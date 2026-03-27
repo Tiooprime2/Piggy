@@ -1,890 +1,927 @@
 -- ╔══════════════════════════════════════════════╗
--- ║         PIGGY SCRIPT by TiooScript           ║
--- ║         UI: Dark Horror Edition  v1.1        ║
+-- ║       PIGGY SCRIPT by TiooScript  v2.0       ║
+-- ║         Clean UI — No Bug Edition            ║
 -- ╚══════════════════════════════════════════════╝
 
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
-local CoreGui = game:GetService("CoreGui")
+local Players       = game:GetService("Players")
+local RunService    = game:GetService("RunService")
+local UIS           = game:GetService("UserInputService")
+local TweenService  = game:GetService("TweenService")
+local CoreGui       = game:GetService("CoreGui")
+local Lighting      = game:GetService("Lighting")
 
-local LocalPlayer = Players.LocalPlayer
-local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
-local Humanoid = Character:WaitForChild("Humanoid")
+local LP  = Players.LocalPlayer
+local Char = LP.Character or LP.CharacterAdded:Wait()
+
+-- ══════════════════════════════════════
+-- CLEANUP OLD
+-- ══════════════════════════════════════
+local oldGui = CoreGui:FindFirstChild("TiooGui")
+if oldGui then oldGui:Destroy() end
 
 -- ══════════════════════════════════════
 -- STATE
 -- ══════════════════════════════════════
-local State = {
-    NoClip      = false,
-    WalkSpeed   = 16,
-    JumpPower   = 50,
-    SpeedBoost  = false,
-    InfiniteJump= false,
-    PlayerESP   = false,
-    PiggyESP    = false,
-    Fullbright  = false,
-    Minimized   = false,
-    AntiAFK     = false,
+local S = {
+    NoClip       = false,
+    SpeedBoost   = false,
+    InfiniteJump = false,
+    PlayerESP    = false,
+    PiggyESP     = false,
+    Fullbright   = false,
+    AntiAFK      = false,
+    WalkSpeed    = 16,
+    JumpPower    = 50,
 }
 
 -- ══════════════════════════════════════
--- DESTROY OLD GUI
+-- SAVED COLLISION (untuk restore NoClip)
 -- ══════════════════════════════════════
-local old = CoreGui:FindFirstChild("TiooScriptGUI")
-if old then old:Destroy() end
+local savedCol = {}
 
--- ══════════════════════════════════════
--- GUI ROOT
--- ══════════════════════════════════════
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "TiooScriptGUI"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ScreenGui.Parent = CoreGui
-
--- ══════════════════════════════════════
--- COLOR PALETTE
--- ══════════════════════════════════════
-local C = {
-    BG        = Color3.fromRGB(6, 6, 10),
-    Panel     = Color3.fromRGB(12, 12, 20),
-    Card      = Color3.fromRGB(18, 18, 28),
-    Accent    = Color3.fromRGB(200, 40, 40),
-    AccentDim = Color3.fromRGB(100, 20, 20),
-    Text      = Color3.fromRGB(235, 225, 220),
-    SubText   = Color3.fromRGB(140, 130, 125),
-    ON        = Color3.fromRGB(60, 210, 100),
-    OFF       = Color3.fromRGB(200, 50, 50),
-    Border    = Color3.fromRGB(40, 15, 15),
-    Shadow    = Color3.fromRGB(0, 0, 0),
-}
-
--- ══════════════════════════════════════
--- HELPER FUNCTIONS
--- ══════════════════════════════════════
-local function makeTween(obj, props, duration, style, dir)
-    local info = TweenInfo.new(duration or 0.25, style or Enum.EasingStyle.Quart, dir or Enum.EasingDirection.Out)
-    return TweenService:Create(obj, info, props)
-end
-
-local function newInst(class, props)
-    local inst = Instance.new(class)
-    for k, v in pairs(props) do inst[k] = v end
-    return inst
-end
-
-local function round(frame, radius)
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, radius or 6)
-    corner.Parent = frame
-    return corner
-end
-
-local function stroke(frame, color, thickness)
-    local s = Instance.new("UIStroke")
-    s.Color = color or C.Border
-    s.Thickness = thickness or 1
-    s.Parent = frame
-    return s
-end
-
--- ══════════════════════════════════════
--- NOCLIP — simpan collision asli, restore saat OFF
--- ══════════════════════════════════════
-local savedCollision = {} -- [BasePart] = originalCanCollide
-
-local function applyNoClip(char, enable)
+local function setNoClip(char, on)
     if not char then return end
-    for _, part in pairs(char:GetDescendants()) do
-        if part:IsA("BasePart") then
-            if enable then
-                -- simpan nilai asli sebelum dimatiin
-                if savedCollision[part] == nil then
-                    savedCollision[part] = part.CanCollide
-                end
-                part.CanCollide = false
+    for _, p in ipairs(char:GetDescendants()) do
+        if p:IsA("BasePart") then
+            if on then
+                if savedCol[p] == nil then savedCol[p] = p.CanCollide end
+                p.CanCollide = false
             else
-                -- kembalikan nilai asli
-                if savedCollision[part] ~= nil then
-                    part.CanCollide = savedCollision[part]
-                    savedCollision[part] = nil
-                else
-                    part.CanCollide = true
-                end
+                p.CanCollide = (savedCol[p] ~= nil) and savedCol[p] or true
+                savedCol[p] = nil
             end
         end
     end
 end
 
 -- ══════════════════════════════════════
--- ESP — pakai Highlight (tidak scale dengan jarak)
+-- ESP — Highlight (tidak scale jarak)
 -- ══════════════════════════════════════
-local ESP_FOLDER_NAME = "TiooESPHighlight"
+local HL_NAME = "TiooHL"
 
-local function addHighlight(char, fillColor, outlineColor)
-    if not char then return end
-    -- hapus dulu kalau udah ada
-    local old_hl = char:FindFirstChild(ESP_FOLDER_NAME)
-    if old_hl then old_hl:Destroy() end
-
-    local hl = Instance.new("Highlight")
-    hl.Name = ESP_FOLDER_NAME
-    hl.Adornee = char
-    hl.FillColor = fillColor
-    hl.OutlineColor = outlineColor
-    hl.FillTransparency = 0.5
-    hl.OutlineTransparency = 0
-    -- DepthMode = AlwaysOnTop = tembus tembok
-    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    hl.Parent = char
+local function addHL(char, fill, outline)
+    if not char or char:FindFirstChild(HL_NAME) then return end
+    local h = Instance.new("Highlight")
+    h.Name = HL_NAME
+    h.Adornee = char
+    h.FillColor = fill
+    h.OutlineColor = outline
+    h.FillTransparency = 0.45
+    h.OutlineTransparency = 0
+    h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    h.Parent = char
 end
 
-local function removeHighlight(char)
+local function removeHL(char)
     if not char then return end
-    local hl = char:FindFirstChild(ESP_FOLDER_NAME)
-    if hl then hl:Destroy() end
+    local h = char:FindFirstChild(HL_NAME)
+    if h then h:Destroy() end
 end
 
--- Player ESP (hijau)
-local playerESPConns = {}
-local function refreshPlayerESP(enable)
-    -- bersih koneksi lama
-    for _, conn in pairs(playerESPConns) do conn:Disconnect() end
-    playerESPConns = {}
+local espConns = {}
 
-    for _, plr in pairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer then
-            if enable then
-                -- pasang sekarang jika char udah ada
-                if plr.Character then
-                    addHighlight(plr.Character, Color3.fromRGB(0,255,80), Color3.fromRGB(0,200,60))
-                end
-                -- pasang juga kalau respawn
-                local conn = plr.CharacterAdded:Connect(function(char)
-                    task.wait(0.5)
-                    if State.PlayerESP then
-                        addHighlight(char, Color3.fromRGB(0,255,80), Color3.fromRGB(0,200,60))
-                    end
+local function setPlayerESP(on)
+    for _, c in ipairs(espConns) do c:Disconnect() end
+    espConns = {}
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LP then
+            if on then
+                if plr.Character then addHL(plr.Character, Color3.fromRGB(0,230,80), Color3.fromRGB(0,180,60)) end
+                local c = plr.CharacterAdded:Connect(function(ch)
+                    task.wait(0.3)
+                    if S.PlayerESP then addHL(ch, Color3.fromRGB(0,230,80), Color3.fromRGB(0,180,60)) end
                 end)
-                table.insert(playerESPConns, conn)
+                table.insert(espConns, c)
             else
-                if plr.Character then
-                    removeHighlight(plr.Character)
-                end
+                if plr.Character then removeHL(plr.Character) end
             end
         end
     end
 end
 
--- Piggy NPC ESP (merah)
--- Piggy NPC biasanya punya Humanoid tapi bukan Player
--- Kita scan workspace tiap beberapa detik
-local piggyESPConn = nil
-local function isPiggyNPC(model)
-    -- Cek: punya Humanoid, bukan karakter player
-    if not model:FindFirstChildOfClass("Humanoid") then return false end
-    for _, plr in pairs(Players:GetPlayers()) do
-        if plr.Character == model then return false end
+local piggyTask = nil
+
+local function isPiggyNPC(m)
+    if not m:IsA("Model") then return false end
+    if not m:FindFirstChildOfClass("Humanoid") then return false end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr.Character == m then return false end
     end
     return true
 end
 
-local function refreshPiggyESP(enable)
-    if piggyESPConn then
-        piggyESPConn:Disconnect()
-        piggyESPConn = nil
+local function setPiggyESP(on)
+    if piggyTask then task.cancel(piggyTask) piggyTask = nil end
+    for _, m in ipairs(workspace:GetDescendants()) do
+        if isPiggyNPC(m) then removeHL(m) end
     end
-
-    -- Hapus semua highlight piggy dulu
-    for _, model in pairs(workspace:GetDescendants()) do
-        if model:IsA("Model") and model:FindFirstChild(ESP_FOLDER_NAME) then
-            -- cek apakah ini NPC (bukan player char)
-            local isPlayer = false
-            for _, plr in pairs(Players:GetPlayers()) do
-                if plr.Character == model then isPlayer = true break end
-            end
-            if not isPlayer then
-                removeHighlight(model)
-            end
-        end
-    end
-
-    if not enable then return end
-
-    -- Scan dan pasang highlight ke Piggy NPC
-    local function scanAndHighlight()
-        for _, obj in pairs(workspace:GetDescendants()) do
-            if obj:IsA("Model") and isPiggyNPC(obj) then
-                local existing = obj:FindFirstChild(ESP_FOLDER_NAME)
-                if not existing then
-                    addHighlight(obj, Color3.fromRGB(255,30,30), Color3.fromRGB(255,0,0))
+    if not on then return end
+    piggyTask = task.spawn(function()
+        while S.PiggyESP do
+            for _, m in ipairs(workspace:GetDescendants()) do
+                if isPiggyNPC(m) then
+                    addHL(m, Color3.fromRGB(255,40,40), Color3.fromRGB(200,0,0))
                 end
             end
-        end
-    end
-
-    scanAndHighlight()
-
-    -- Loop terus tiap 2 detik (karena Piggy bisa spawn ulang)
-    piggyESPConn = RunService.Heartbeat:Connect(function()
-        if not State.PiggyESP then return end
-        -- hanya scan setiap ~2 detik biar ringan
-    end)
-
-    -- Gunakan task.spawn + loop ringan
-    task.spawn(function()
-        while State.PiggyESP do
-            scanAndHighlight()
-            task.wait(2)
+            task.wait(1.5)
         end
     end)
 end
 
 -- ══════════════════════════════════════
--- MAIN FRAME
+-- GUI ROOT
 -- ══════════════════════════════════════
-local Main = newInst("Frame", {
-    Name = "Main",
-    Size = UDim2.new(0, 320, 0, 420),
-    Position = UDim2.new(0.5, -160, 0.5, -210),
-    BackgroundColor3 = C.BG,
-    BorderSizePixel = 0,
-    ZIndex = 10,
-    Parent = ScreenGui,
-})
-round(Main, 10)
-stroke(Main, C.Border, 1.5)
+local gui = Instance.new("ScreenGui")
+gui.Name = "TiooGui"
+gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.DisplayOrder = 999
+gui.Parent = CoreGui
 
-local noise = newInst("Frame", {
-    Size = UDim2.new(1, 0, 1, 0),
-    BackgroundColor3 = Color3.fromRGB(255,255,255),
-    BackgroundTransparency = 0.97,
-    ZIndex = 11,
-    Parent = Main,
-})
-round(noise, 10)
+-- ══════════════════════════════════════
+-- WARNA
+-- ══════════════════════════════════════
+local BG       = Color3.fromRGB(14, 14, 20)
+local SURFACE  = Color3.fromRGB(22, 22, 32)
+local CARD     = Color3.fromRGB(28, 28, 42)
+local ACCENT   = Color3.fromRGB(110, 80, 255)   -- ungu modern
+local ACCENT2  = Color3.fromRGB(80, 55, 200)
+local TEXT     = Color3.fromRGB(240, 238, 255)
+local MUTED    = Color3.fromRGB(130, 128, 155)
+local GREEN    = Color3.fromRGB(50, 210, 110)
+local RED      = Color3.fromRGB(220, 60, 60)
+local BORDER   = Color3.fromRGB(45, 44, 65)
 
--- TOP ACCENT LINE
-local topLine = newInst("Frame", {
-    Size = UDim2.new(1, 0, 0, 3),
-    BackgroundColor3 = C.Accent,
-    ZIndex = 12,
-    Parent = Main,
-})
-newInst("UIGradient", {
-    Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(80,0,0)),
-        ColorSequenceKeypoint.new(0.5, C.Accent),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(80,0,0)),
-    }),
-    Parent = topLine,
-})
-Instance.new("UICorner", topLine).CornerRadius = UDim.new(0,10)
+local function tw(obj, props, t, style)
+    TweenService:Create(obj, TweenInfo.new(t or 0.22, style or Enum.EasingStyle.Quart, Enum.EasingDirection.Out), props):Play()
+end
+
+local function corner(obj, r)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, r or 8)
+    c.Parent = obj
+end
+
+local function border(obj, col, thick)
+    local s = Instance.new("UIStroke")
+    s.Color = col or BORDER
+    s.Thickness = thick or 1
+    s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    s.Parent = obj
+end
+
+local function lbl(props)
+    local t = Instance.new("TextLabel")
+    t.BackgroundTransparency = 1
+    t.Font = Enum.Font.GothamBold
+    t.TextColor3 = TEXT
+    t.TextSize = 13
+    for k, v in pairs(props) do t[k] = v end
+    return t
+end
+
+-- ══════════════════════════════════════
+-- WINDOW
+-- ══════════════════════════════════════
+local WIN_W, WIN_H = 300, 440
+
+local shadow = Instance.new("Frame")
+shadow.Name = "Shadow"
+shadow.Size = UDim2.new(0, WIN_W + 20, 0, WIN_H + 20)
+shadow.Position = UDim2.new(0.5, -(WIN_W/2+10), 0.5, -(WIN_H/2+10))
+shadow.BackgroundColor3 = Color3.fromRGB(0,0,0)
+shadow.BackgroundTransparency = 0.55
+shadow.BorderSizePixel = 0
+shadow.ZIndex = 9
+shadow.Parent = gui
+corner(shadow, 14)
+
+local win = Instance.new("Frame")
+win.Name = "Window"
+win.Size = UDim2.new(0, WIN_W, 0, WIN_H)
+win.Position = UDim2.new(0.5, -WIN_W/2, 0.5, -WIN_H/2)
+win.BackgroundColor3 = BG
+win.BorderSizePixel = 0
+win.ZIndex = 10
+win.ClipsDescendants = true
+win.Parent = gui
+corner(win, 12)
+border(win, BORDER, 1)
 
 -- ══════════════════════════════════════
 -- HEADER
 -- ══════════════════════════════════════
-local Header = newInst("Frame", {
-    Size = UDim2.new(1, 0, 0, 52),
-    BackgroundColor3 = C.Panel,
-    ZIndex = 12,
-    Parent = Main,
-})
-round(Header, 10)
-stroke(Header, C.Border, 1)
+local header = Instance.new("Frame")
+header.Size = UDim2.new(1, 0, 0, 50)
+header.BackgroundColor3 = SURFACE
+header.BorderSizePixel = 0
+header.ZIndex = 11
+header.Parent = win
 
-newInst("Frame", {
-    Size = UDim2.new(1, 0, 0.5, 0),
-    Position = UDim2.new(0, 0, 0.5, 0),
-    BackgroundColor3 = C.Panel,
-    ZIndex = 12,
-    Parent = Header,
-})
+local hBorder = Instance.new("Frame")
+hBorder.Size = UDim2.new(1, 0, 0, 1)
+hBorder.Position = UDim2.new(0, 0, 1, -1)
+hBorder.BackgroundColor3 = BORDER
+hBorder.BorderSizePixel = 0
+hBorder.ZIndex = 12
+hBorder.Parent = header
 
-local drip = newInst("TextLabel", {
-    Size = UDim2.new(0, 36, 0, 36),
-    Position = UDim2.new(0, 12, 0.5, -18),
-    BackgroundColor3 = C.AccentDim,
+-- icon bg
+local iconBg = Instance.new("Frame")
+iconBg.Size = UDim2.new(0, 30, 0, 30)
+iconBg.Position = UDim2.new(0, 12, 0.5, -15)
+iconBg.BackgroundColor3 = ACCENT2
+iconBg.ZIndex = 12
+iconBg.Parent = header
+corner(iconBg, 8)
+
+local iconLbl = lbl({
+    Size = UDim2.new(1,0,1,0),
     Text = "🐷",
     TextScaled = true,
     ZIndex = 13,
-    Parent = Header,
+    Parent = iconBg,
 })
-round(drip, 8)
 
-newInst("TextLabel", {
-    Size = UDim2.new(1, -120, 1, 0),
-    Position = UDim2.new(0, 58, 0, 0),
-    BackgroundTransparency = 1,
+local titleLbl = lbl({
+    Size = UDim2.new(0, 120, 0, 20),
+    Position = UDim2.new(0, 50, 0, 7),
     Text = "PIGGY SCRIPT",
-    TextColor3 = C.Text,
-    TextSize = 15,
-    Font = Enum.Font.GothamBold,
+    TextSize = 13,
+    TextColor3 = TEXT,
     TextXAlignment = Enum.TextXAlignment.Left,
-    ZIndex = 13,
-    Parent = Header,
-})
-
-newInst("TextLabel", {
-    Size = UDim2.new(1, -120, 0, 16),
-    Position = UDim2.new(0, 58, 0, 24),
-    BackgroundTransparency = 1,
-    Text = "by TiooScript • v1.1",
-    TextColor3 = C.SubText,
-    TextSize = 10,
-    Font = Enum.Font.Gotham,
-    TextXAlignment = Enum.TextXAlignment.Left,
-    ZIndex = 13,
-    Parent = Header,
-})
-
-local btnMin = newInst("TextButton", {
-    Size = UDim2.new(0, 26, 0, 26),
-    Position = UDim2.new(1, -60, 0.5, -13),
-    BackgroundColor3 = C.Card,
-    Text = "—",
-    TextColor3 = C.SubText,
-    TextSize = 12,
-    Font = Enum.Font.GothamBold,
-    ZIndex = 14,
-    Parent = Header,
-})
-round(btnMin, 6)
-stroke(btnMin, C.Border)
-
-local btnClose = newInst("TextButton", {
-    Size = UDim2.new(0, 26, 0, 26),
-    Position = UDim2.new(1, -28, 0.5, -13),
-    BackgroundColor3 = Color3.fromRGB(80, 15, 15),
-    Text = "✕",
-    TextColor3 = C.Accent,
-    TextSize = 11,
-    Font = Enum.Font.GothamBold,
-    ZIndex = 14,
-    Parent = Header,
-})
-round(btnClose, 6)
-stroke(btnClose, C.Accent, 1)
-
--- ══════════════════════════════════════
--- TABS
--- ══════════════════════════════════════
-local TabBar = newInst("Frame", {
-    Size = UDim2.new(1, -16, 0, 32),
-    Position = UDim2.new(0, 8, 0, 58),
-    BackgroundColor3 = C.Panel,
     ZIndex = 12,
-    Parent = Main,
+    Parent = header,
 })
-round(TabBar, 8)
-stroke(TabBar, C.Border)
+
+local verLbl = lbl({
+    Size = UDim2.new(0, 120, 0, 14),
+    Position = UDim2.new(0, 50, 0, 28),
+    Text = "v2.0 • by Tiooprime2",
+    TextSize = 9,
+    Font = Enum.Font.Gotham,
+    TextColor3 = MUTED,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    ZIndex = 12,
+    Parent = header,
+})
+
+-- minimize btn
+local minBtn = Instance.new("TextButton")
+minBtn.Size = UDim2.new(0, 24, 0, 24)
+minBtn.Position = UDim2.new(1, -56, 0.5, -12)
+minBtn.BackgroundColor3 = CARD
+minBtn.Text = "—"
+minBtn.TextColor3 = MUTED
+minBtn.TextSize = 11
+minBtn.Font = Enum.Font.GothamBold
+minBtn.ZIndex = 13
+minBtn.Parent = header
+corner(minBtn, 6)
+border(minBtn, BORDER)
+
+-- close btn
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 24, 0, 24)
+closeBtn.Position = UDim2.new(1, -28, 0.5, -12)
+closeBtn.BackgroundColor3 = Color3.fromRGB(60,20,20)
+closeBtn.Text = "✕"
+closeBtn.TextColor3 = RED
+closeBtn.TextSize = 10
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.ZIndex = 13
+closeBtn.Parent = header
+corner(closeBtn, 6)
+border(closeBtn, Color3.fromRGB(80,30,30))
+
+-- ══════════════════════════════════════
+-- TAB BAR
+-- ══════════════════════════════════════
+local tabBar = Instance.new("Frame")
+tabBar.Size = UDim2.new(1, -20, 0, 30)
+tabBar.Position = UDim2.new(0, 10, 0, 58)
+tabBar.BackgroundColor3 = SURFACE
+tabBar.BorderSizePixel = 0
+tabBar.ZIndex = 11
+tabBar.Parent = win
+corner(tabBar, 8)
+border(tabBar, BORDER)
 
 local tabLayout = Instance.new("UIListLayout")
 tabLayout.FillDirection = Enum.FillDirection.Horizontal
 tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
-tabLayout.Padding = UDim.new(0, 4)
-tabLayout.Parent = TabBar
+tabLayout.Padding = UDim.new(0, 2)
+tabLayout.Parent = tabBar
 
 local tabPad = Instance.new("UIPadding")
-tabPad.PaddingLeft = UDim.new(0, 4)
-tabPad.PaddingTop = UDim.new(0, 4)
-tabPad.PaddingBottom = UDim.new(0, 4)
-tabPad.Parent = TabBar
-
-local tabNames = {"Player", "Visual", "Misc"}
-local tabBtns = {}
-local tabPages = {}
-
-for i, name in ipairs(tabNames) do
-    local btn = newInst("TextButton", {
-        Size = UDim2.new(0, 88, 1, 0),
-        BackgroundColor3 = i == 1 and C.Accent or C.Card,
-        Text = name,
-        TextColor3 = i == 1 and Color3.fromRGB(255,255,255) or C.SubText,
-        TextSize = 11,
-        Font = Enum.Font.GothamBold,
-        ZIndex = 13,
-        LayoutOrder = i,
-        Parent = TabBar,
-    })
-    round(btn, 6)
-    tabBtns[name] = btn
-end
+tabPad.PaddingLeft = UDim.new(0, 3)
+tabPad.PaddingRight = UDim.new(0, 3)
+tabPad.PaddingTop = UDim.new(0, 3)
+tabPad.PaddingBottom = UDim.new(0, 3)
+tabPad.Parent = tabBar
 
 -- ══════════════════════════════════════
--- CONTENT AREA
+-- SCROLL AREA  (fix: ScrollingFrame bersih)
 -- ══════════════════════════════════════
-local ContentArea = newInst("Frame", {
-    Size = UDim2.new(1, -16, 1, -108),
-    Position = UDim2.new(0, 8, 0, 96),
-    BackgroundTransparency = 1,
-    ZIndex = 12,
-    Parent = Main,
+local scrollArea = Instance.new("ScrollingFrame")
+scrollArea.Size = UDim2.new(1, 0, 1, -100)
+scrollArea.Position = UDim2.new(0, 0, 0, 96)
+scrollArea.BackgroundTransparency = 1
+scrollArea.BorderSizePixel = 0
+scrollArea.ScrollBarThickness = 3
+scrollArea.ScrollBarImageColor3 = ACCENT
+scrollArea.ScrollBarImageTransparency = 0.3
+scrollArea.CanvasSize = UDim2.new(0, 0, 0, 0)
+scrollArea.AutomaticCanvasSize = Enum.AutomaticSize.Y  -- otomatis, tidak perlu hitung manual
+scrollArea.VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar
+scrollArea.ScrollingDirection = Enum.ScrollingDirection.Y
+scrollArea.ZIndex = 11
+scrollArea.Parent = win
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.Padding = UDim.new(0, 6)
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+listLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+listLayout.Parent = scrollArea
+
+local listPad = Instance.new("UIPadding")
+listPad.PaddingTop = UDim.new(0, 8)
+listPad.PaddingBottom = UDim.new(0, 10)
+listPad.PaddingLeft = UDim.new(0, 10)
+listPad.PaddingRight = UDim.new(0, 10)
+listPad.Parent = scrollArea
+
+-- ══════════════════════════════════════
+-- STATUS BAR
+-- ══════════════════════════════════════
+local statusBar = Instance.new("Frame")
+statusBar.Size = UDim2.new(1, 0, 0, 28)
+statusBar.Position = UDim2.new(0, 0, 1, -28)
+statusBar.BackgroundColor3 = SURFACE
+statusBar.BorderSizePixel = 0
+statusBar.ZIndex = 11
+statusBar.Parent = win
+
+local statusTopLine = Instance.new("Frame")
+statusTopLine.Size = UDim2.new(1, 0, 0, 1)
+statusTopLine.BackgroundColor3 = BORDER
+statusTopLine.BorderSizePixel = 0
+statusTopLine.ZIndex = 12
+statusTopLine.Parent = statusBar
+
+local dot = Instance.new("Frame")
+dot.Size = UDim2.new(0, 7, 0, 7)
+dot.Position = UDim2.new(0, 10, 0.5, -3.5)
+dot.BackgroundColor3 = GREEN
+dot.BorderSizePixel = 0
+dot.ZIndex = 13
+dot.Parent = statusBar
+corner(dot, 4)
+
+local statusTxt = lbl({
+    Size = UDim2.new(1, -28, 1, 0),
+    Position = UDim2.new(0, 22, 0, 0),
+    Text = "Script aktif • NoClip: OFF",
+    TextSize = 9,
+    Font = Enum.Font.Gotham,
+    TextColor3 = MUTED,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    ZIndex = 13,
+    Parent = statusBar,
 })
 
 -- ══════════════════════════════════════
--- CARD BUILDER
+-- TAB + PAGE SYSTEM
 -- ══════════════════════════════════════
-local function makeCard(parent, label, desc, initState, callback)
-    local card = newInst("Frame", {
-        Size = UDim2.new(1, 0, 0, 56),
-        BackgroundColor3 = C.Card,
-        ZIndex = 13,
-        Parent = parent,
-    })
-    round(card, 8)
-    stroke(card, C.Border)
+local tabs = {"Player", "Visual", "Misc"}
+local tabBtns = {}
+local pages = {}   -- page = Frame yg berisi cards, di dalam scrollArea
+local activePage = "Player"
 
-    local bar = newInst("Frame", {
-        Size = UDim2.new(0, 3, 0.6, 0),
-        Position = UDim2.new(0, 0, 0.2, 0),
-        BackgroundColor3 = C.Accent,
-        ZIndex = 14,
-        Parent = card,
-    })
-    round(bar, 3)
+-- Buat semua halaman sekaligus (semua di dalam scrollArea, toggle visible)
+for _, name in ipairs(tabs) do
+    local frame = Instance.new("Frame")
+    frame.Name = "Page_"..name
+    frame.Size = UDim2.new(1, 0, 0, 0)  -- height auto dari content
+    frame.AutomaticSize = Enum.AutomaticSize.Y
+    frame.BackgroundTransparency = 1
+    frame.Visible = (name == "Player")
+    frame.BorderSizePixel = 0
+    frame.ZIndex = 12
+    frame.LayoutOrder = 1
+    frame.Parent = scrollArea
 
-    newInst("TextLabel", {
-        Size = UDim2.new(1, -80, 0, 20),
+    local fl = Instance.new("UIListLayout")
+    fl.Padding = UDim.new(0, 6)
+    fl.SortOrder = Enum.SortOrder.LayoutOrder
+    fl.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    fl.Parent = frame
+
+    pages[name] = frame
+end
+
+-- Buat tab buttons
+for i, name in ipairs(tabs) do
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 86, 1, 0)
+    btn.BackgroundColor3 = i == 1 and ACCENT or Color3.fromRGB(0,0,0)
+    btn.BackgroundTransparency = i == 1 and 0 or 1
+    btn.Text = name
+    btn.TextColor3 = i == 1 and TEXT or MUTED
+    btn.TextSize = 10
+    btn.Font = Enum.Font.GothamBold
+    btn.ZIndex = 12
+    btn.LayoutOrder = i
+    btn.Parent = tabBar
+    corner(btn, 6)
+    tabBtns[name] = btn
+
+    btn.MouseButton1Click:Connect(function()
+        if activePage == name then return end
+        activePage = name
+        scrollArea.CanvasPosition = Vector2.new(0, 0)  -- reset scroll ke atas
+        for _, n in ipairs(tabs) do
+            local isActive = n == name
+            tw(tabBtns[n], {
+                BackgroundColor3 = isActive and ACCENT or Color3.fromRGB(0,0,0),
+                BackgroundTransparency = isActive and 0 or 1,
+                TextColor3 = isActive and TEXT or MUTED,
+            }, 0.18)
+            pages[n].Visible = isActive
+        end
+    end)
+end
+
+-- ══════════════════════════════════════
+-- CARD BUILDERS
+-- ══════════════════════════════════════
+
+-- Toggle Card
+local function makeToggle(pageName, labelTxt, descTxt, callback)
+    local page = pages[pageName]
+
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(1, 0, 0, 54)
+    card.BackgroundColor3 = CARD
+    card.BorderSizePixel = 0
+    card.ZIndex = 13
+    card.Parent = page
+    corner(card, 9)
+    border(card, BORDER)
+
+    -- left accent strip
+    local strip = Instance.new("Frame")
+    strip.Size = UDim2.new(0, 3, 0.55, 0)
+    strip.Position = UDim2.new(0, 0, 0.225, 0)
+    strip.BackgroundColor3 = ACCENT
+    strip.BorderSizePixel = 0
+    strip.ZIndex = 14
+    strip.Parent = card
+    corner(strip, 2)
+
+    local titleL = lbl({
+        Size = UDim2.new(1, -76, 0, 20),
         Position = UDim2.new(0, 14, 0, 8),
-        BackgroundTransparency = 1,
-        Text = label,
-        TextColor3 = C.Text,
+        Text = labelTxt,
         TextSize = 12,
-        Font = Enum.Font.GothamBold,
+        TextColor3 = TEXT,
         TextXAlignment = Enum.TextXAlignment.Left,
         ZIndex = 14,
         Parent = card,
     })
 
-    newInst("TextLabel", {
-        Size = UDim2.new(1, -80, 0, 16),
+    local descL = lbl({
+        Size = UDim2.new(1, -76, 0, 14),
         Position = UDim2.new(0, 14, 0, 30),
-        BackgroundTransparency = 1,
-        Text = desc,
-        TextColor3 = C.SubText,
+        Text = descTxt,
         TextSize = 9,
         Font = Enum.Font.Gotham,
+        TextColor3 = MUTED,
         TextXAlignment = Enum.TextXAlignment.Left,
         ZIndex = 14,
         Parent = card,
     })
 
-    local currentState = initState or false
-    local badge = newInst("TextButton", {
-        Size = UDim2.new(0, 48, 0, 22),
-        Position = UDim2.new(1, -58, 0.5, -11),
-        BackgroundColor3 = currentState and C.ON or C.OFF,
-        Text = currentState and "ON" or "OFF",
-        TextColor3 = Color3.fromRGB(255,255,255),
-        TextSize = 10,
-        Font = Enum.Font.GothamBold,
-        ZIndex = 14,
-        Parent = card,
-    })
-    round(badge, 11)
+    local togBg = Instance.new("Frame")
+    togBg.Size = UDim2.new(0, 42, 0, 22)
+    togBg.Position = UDim2.new(1, -52, 0.5, -11)
+    togBg.BackgroundColor3 = Color3.fromRGB(40, 40, 58)
+    togBg.ZIndex = 14
+    togBg.Parent = card
+    corner(togBg, 11)
+    border(togBg, BORDER)
 
-    badge.MouseButton1Click:Connect(function()
-        currentState = not currentState
-        makeTween(badge, {BackgroundColor3 = currentState and C.ON or C.OFF}, 0.2):Play()
-        badge.Text = currentState and "ON" or "OFF"
-        if callback then callback(currentState) end
+    local togKnob = Instance.new("Frame")
+    togKnob.Size = UDim2.new(0, 16, 0, 16)
+    togKnob.Position = UDim2.new(0, 3, 0.5, -8)
+    togKnob.BackgroundColor3 = MUTED
+    togKnob.ZIndex = 15
+    togKnob.Parent = togBg
+    corner(togKnob, 8)
+
+    local state = false
+
+    local togBtn = Instance.new("TextButton")
+    togBtn.Size = UDim2.new(1, 0, 1, 0)
+    togBtn.BackgroundTransparency = 1
+    togBtn.Text = ""
+    togBtn.ZIndex = 16
+    togBtn.Parent = togBg
+
+    local function updateVisual(on)
+        tw(togBg, {BackgroundColor3 = on and ACCENT or Color3.fromRGB(40,40,58)}, 0.2)
+        tw(togKnob, {
+            Position = on and UDim2.new(1,-19, 0.5,-8) or UDim2.new(0,3, 0.5,-8),
+            BackgroundColor3 = on and TEXT or MUTED,
+        }, 0.2)
+    end
+
+    togBtn.MouseButton1Click:Connect(function()
+        state = not state
+        updateVisual(state)
+        if callback then callback(state) end
     end)
 
     return card
 end
 
--- ══════════════════════════════════════
--- SLIDER BUILDER
--- ══════════════════════════════════════
-local function makeSlider(parent, label, minV, maxV, default, callback)
-    local card = newInst("Frame", {
-        Size = UDim2.new(1, 0, 0, 60),
-        BackgroundColor3 = C.Card,
-        ZIndex = 13,
-        Parent = parent,
-    })
-    round(card, 8)
-    stroke(card, C.Border)
+-- Slider Card
+local function makeSlider(pageName, labelTxt, minV, maxV, defVal, callback)
+    local page = pages[pageName]
 
-    local bar2 = newInst("Frame", {
-        Size = UDim2.new(0, 3, 0.6, 0),
-        Position = UDim2.new(0, 0, 0.2, 0),
-        BackgroundColor3 = Color3.fromRGB(60, 140, 255),
-        ZIndex = 14,
-        Parent = card,
-    })
-    round(bar2, 3)
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(1, 0, 0, 58)
+    card.BackgroundColor3 = CARD
+    card.BorderSizePixel = 0
+    card.ZIndex = 13
+    card.Parent = page
+    corner(card, 9)
+    border(card, BORDER)
 
-    newInst("TextLabel", {
-        Size = UDim2.new(0.7, 0, 0, 18),
-        Position = UDim2.new(0, 14, 0, 6),
-        BackgroundTransparency = 1,
-        Text = label,
-        TextColor3 = C.Text,
+    local strip = Instance.new("Frame")
+    strip.Size = UDim2.new(0, 3, 0.55, 0)
+    strip.Position = UDim2.new(0, 0, 0.225, 0)
+    strip.BackgroundColor3 = Color3.fromRGB(80, 160, 255)
+    strip.BorderSizePixel = 0
+    strip.ZIndex = 14
+    strip.Parent = card
+    corner(strip, 2)
+
+    local titleL = lbl({
+        Size = UDim2.new(0.6, 0, 0, 18),
+        Position = UDim2.new(0, 14, 0, 7),
+        Text = labelTxt,
         TextSize = 11,
-        Font = Enum.Font.GothamBold,
         TextXAlignment = Enum.TextXAlignment.Left,
         ZIndex = 14,
         Parent = card,
     })
 
-    local valLbl = newInst("TextLabel", {
-        Size = UDim2.new(0.3, -14, 0, 18),
-        Position = UDim2.new(0.7, 0, 0, 6),
-        BackgroundTransparency = 1,
-        Text = tostring(default),
-        TextColor3 = C.Accent,
-        TextSize = 11,
-        Font = Enum.Font.GothamBold,
-        TextXAlignment = Enum.TextXAlignment.Right,
-        ZIndex = 14,
-        Parent = card,
-    })
+    local valBox = Instance.new("Frame")
+    valBox.Size = UDim2.new(0, 38, 0, 18)
+    valBox.Position = UDim2.new(1, -48, 0, 7)
+    valBox.BackgroundColor3 = SURFACE
+    valBox.BorderSizePixel = 0
+    valBox.ZIndex = 14
+    valBox.Parent = card
+    corner(valBox, 5)
+    border(valBox, BORDER)
 
-    local track = newInst("Frame", {
-        Size = UDim2.new(1, -28, 0, 6),
-        Position = UDim2.new(0, 14, 0, 36),
-        BackgroundColor3 = C.Panel,
-        ZIndex = 14,
-        Parent = card,
-    })
-    round(track, 3)
-    stroke(track, C.Border)
-
-    local initRel = (default - minV) / (maxV - minV)
-    local fill = newInst("Frame", {
-        Size = UDim2.new(initRel, 0, 1, 0),
-        BackgroundColor3 = Color3.fromRGB(60, 140, 255),
+    local valL = lbl({
+        Size = UDim2.new(1, 0, 1, 0),
+        Text = tostring(defVal),
+        TextSize = 10,
+        TextColor3 = Color3.fromRGB(80, 160, 255),
         ZIndex = 15,
-        Parent = track,
+        Parent = valBox,
     })
-    round(fill, 3)
 
-    local knob = newInst("Frame", {
-        Size = UDim2.new(0, 14, 0, 14),
-        Position = UDim2.new(initRel, -7, 0.5, -7),
-        BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-        ZIndex = 16,
-        Parent = track,
-    })
-    round(knob, 7)
-    stroke(knob, Color3.fromRGB(60,140,255), 1.5)
+    -- track
+    local trackBg = Instance.new("Frame")
+    trackBg.Size = UDim2.new(1, -24, 0, 5)
+    trackBg.Position = UDim2.new(0, 12, 0, 37)
+    trackBg.BackgroundColor3 = SURFACE
+    trackBg.BorderSizePixel = 0
+    trackBg.ZIndex = 14
+    trackBg.Parent = card
+    corner(trackBg, 3)
+    border(trackBg, BORDER)
+
+    local rel0 = (defVal - minV) / (maxV - minV)
+
+    local trackFill = Instance.new("Frame")
+    trackFill.Size = UDim2.new(rel0, 0, 1, 0)
+    trackFill.BackgroundColor3 = Color3.fromRGB(80, 160, 255)
+    trackFill.BorderSizePixel = 0
+    trackFill.ZIndex = 15
+    trackFill.Parent = trackBg
+    corner(trackFill, 3)
+
+    local knob = Instance.new("Frame")
+    knob.Size = UDim2.new(0, 13, 0, 13)
+    knob.Position = UDim2.new(rel0, -6, 0.5, -6)
+    knob.BackgroundColor3 = TEXT
+    knob.BorderSizePixel = 0
+    knob.ZIndex = 16
+    knob.Parent = trackBg
+    corner(knob, 7)
+
+    -- invisible input catcher (full card width for easy touch)
+    local inputCatch = Instance.new("TextButton")
+    inputCatch.Size = UDim2.new(1, -24, 0, 24)
+    inputCatch.Position = UDim2.new(0, 12, 0, 30)
+    inputCatch.BackgroundTransparency = 1
+    inputCatch.Text = ""
+    inputCatch.ZIndex = 17
+    inputCatch.Parent = card
 
     local dragging = false
-    knob.InputBegan:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.Touch or inp.UserInputType == Enum.UserInputType.MouseButton1 then
+
+    local function applyPos(inputX)
+        local abs = trackBg.AbsolutePosition.X
+        local sz  = trackBg.AbsoluteSize.X
+        local rel = math.clamp((inputX - abs) / sz, 0, 1)
+        local val = math.floor(minV + (maxV - minV) * rel + 0.5)
+        trackFill.Size = UDim2.new(rel, 0, 1, 0)
+        knob.Position = UDim2.new(rel, -6, 0.5, -6)
+        valL.Text = tostring(val)
+        if callback then callback(val) end
+    end
+
+    inputCatch.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.Touch
+        or inp.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = true
+            applyPos(inp.Position.X)
         end
     end)
-    UserInputService.InputEnded:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.Touch or inp.UserInputType == Enum.UserInputType.MouseButton1 then
+
+    UIS.InputEnded:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.Touch
+        or inp.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = false
         end
     end)
-    UserInputService.InputChanged:Connect(function(inp)
-        if dragging and (inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch) then
-            local rel = math.clamp((inp.Position.X - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
-            local val = math.floor(minV + (maxV - minV) * rel)
-            fill.Size = UDim2.new(rel, 0, 1, 0)
-            knob.Position = UDim2.new(rel, -7, 0.5, -7)
-            valLbl.Text = tostring(val)
-            if callback then callback(val) end
+
+    UIS.InputChanged:Connect(function(inp)
+        if not dragging then return end
+        if inp.UserInputType == Enum.UserInputType.MouseMovement
+        or inp.UserInputType == Enum.UserInputType.Touch then
+            applyPos(inp.Position.X)
         end
     end)
 
     return card
 end
 
--- ══════════════════════════════════════
--- PAGE BUILDER
--- ══════════════════════════════════════
-local function makePage(name)
-    local page = newInst("ScrollingFrame", {
+-- Separator / section label
+local function makeSection(pageName, txt)
+    local page = pages[pageName]
+    local f = Instance.new("Frame")
+    f.Size = UDim2.new(1, 0, 0, 18)
+    f.BackgroundTransparency = 1
+    f.ZIndex = 13
+    f.Parent = page
+
+    local l = lbl({
         Size = UDim2.new(1, 0, 1, 0),
-        BackgroundTransparency = 1,
-        ScrollBarThickness = 3,
-        ScrollBarImageColor3 = C.Accent,
-        ZIndex = 12,
-        Visible = name == "Player",
-        Parent = ContentArea,
-        CanvasSize = UDim2.new(0, 0, 0, 0),
+        Text = txt,
+        TextSize = 9,
+        Font = Enum.Font.Gotham,
+        TextColor3 = MUTED,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 14,
+        Parent = f,
     })
-    local layout = Instance.new("UIListLayout")
-    layout.Padding = UDim.new(0, 6)
-    layout.SortOrder = Enum.SortOrder.LayoutOrder
-    layout.Parent = page
-    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-        page.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
-    end)
-    local pad = Instance.new("UIPadding")
-    pad.PaddingTop = UDim.new(0, 4)
-    pad.PaddingBottom = UDim.new(0, 4)
-    pad.Parent = page
-    tabPages[name] = page
-    return page
+    return f
 end
 
 -- ══════════════════════════════════════
--- PAGES + FEATURES
--- ══════════════════════════════════════
-
 -- PLAYER PAGE
-local playerPage = makePage("Player")
+-- ══════════════════════════════════════
+makeSection("Player", "  MOVEMENT")
 
-makeCard(playerPage, "NO CLIP", "Tembus lewat tembok / dinding", false, function(on)
-    State.NoClip = on
+makeToggle("Player", "NO CLIP", "Tembus lewat tembok / dinding", function(on)
+    S.NoClip = on
     if not on then
-        -- Restore collision langsung saat OFF
-        applyNoClip(LocalPlayer.Character, false)
-        savedCollision = {}
+        setNoClip(LP.Character, false)
+        savedCol = {}
     end
 end)
 
-makeCard(playerPage, "SPEED BOOST", "Kecepatan lari lebih tinggi (x2)", false, function(on)
-    State.SpeedBoost = on
-    local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-    if hum then
-        hum.WalkSpeed = on and 32 or State.WalkSpeed
-    end
+makeToggle("Player", "SPEED BOOST", "Kecepatan lari x2", function(on)
+    S.SpeedBoost = on
+    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+    if hum then hum.WalkSpeed = on and 32 or S.WalkSpeed end
 end)
 
-makeCard(playerPage, "INFINITE JUMP", "Loncat terus-terusan di udara", false, function(on)
-    State.InfiniteJump = on
+makeToggle("Player", "INFINITE JUMP", "Lompat terus di udara", function(on)
+    S.InfiniteJump = on
 end)
 
-makeSlider(playerPage, "WALK SPEED", 8, 100, 16, function(val)
-    State.WalkSpeed = val
-    local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-    if hum and not State.SpeedBoost then
-        hum.WalkSpeed = val
-    end
+makeSection("Player", "  STATS")
+
+makeSlider("Player", "WALK SPEED", 8, 100, 16, function(v)
+    S.WalkSpeed = v
+    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+    if hum and not S.SpeedBoost then hum.WalkSpeed = v end
 end)
 
-makeSlider(playerPage, "JUMP POWER", 20, 200, 50, function(val)
-    State.JumpPower = val
-    local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-    if hum then hum.JumpPower = val end
+makeSlider("Player", "JUMP POWER", 20, 200, 50, function(v)
+    S.JumpPower = v
+    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+    if hum then hum.JumpPower = v end
 end)
 
+-- ══════════════════════════════════════
 -- VISUAL PAGE
-local visualPage = makePage("Visual")
+-- ══════════════════════════════════════
+makeSection("Visual", "  ESP")
 
-makeCard(visualPage, "PLAYER ESP", "Highlight player (hijau, tembus tembok)", false, function(on)
-    State.PlayerESP = on
-    refreshPlayerESP(on)
+makeToggle("Visual", "PLAYER ESP", "Highlight player hijau, tembus tembok", function(on)
+    S.PlayerESP = on
+    setPlayerESP(on)
 end)
 
-makeCard(visualPage, "PIGGY ESP", "Highlight Piggy NPC (merah, tembus tembok)", false, function(on)
-    State.PiggyESP = on
-    refreshPiggyESP(on)
+makeToggle("Visual", "PIGGY ESP", "Highlight Piggy NPC merah, tembus tembok", function(on)
+    S.PiggyESP = on
+    setPiggyESP(on)
 end)
 
-makeCard(visualPage, "FULLBRIGHT", "Terangi semua area gelap", false, function(on)
-    State.Fullbright = on
-    local Lighting = game:GetService("Lighting")
-    Lighting.Brightness = on and 10 or 1
-    Lighting.FogEnd = on and 100000 or 1000
+makeSection("Visual", "  VISUAL")
+
+makeToggle("Visual", "FULLBRIGHT", "Terangi semua area gelap", function(on)
+    S.Fullbright = on
+    Lighting.Brightness = on and 8 or 1
+    Lighting.FogEnd     = on and 100000 or 1000
     Lighting.GlobalShadows = not on
 end)
 
+-- ══════════════════════════════════════
 -- MISC PAGE
-local miscPage = makePage("Misc")
+-- ══════════════════════════════════════
+makeSection("Misc", "  UTILITY")
 
-makeCard(miscPage, "ANTI AFK", "Cegah kick karena idle", false, function(on)
-    State.AntiAFK = on
+makeToggle("Misc", "ANTI AFK", "Cegah kick saat idle", function(on)
+    S.AntiAFK = on
     if on then
-        local VPS = game:GetService("VirtualUser")
-        LocalPlayer.Idled:Connect(function()
-            if State.AntiAFK then
-                VPS:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
-                task.wait(1)
-                VPS:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
-            end
+        local VU = game:GetService("VirtualUser")
+        LP.Idled:Connect(function()
+            if not S.AntiAFK then return end
+            VU:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+            task.wait(0.5)
+            VU:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
         end)
     end
 end)
 
-local infoCard = newInst("Frame", {
-    Size = UDim2.new(1, 0, 0, 56),
-    BackgroundColor3 = Color3.fromRGB(10, 10, 18),
-    ZIndex = 13,
-    Parent = miscPage,
+makeSection("Misc", "  INFO")
+
+-- info card
+local infoCard = Instance.new("Frame")
+infoCard.Size = UDim2.new(1, 0, 0, 52)
+infoCard.BackgroundColor3 = Color3.fromRGB(20, 18, 35)
+infoCard.BorderSizePixel = 0
+infoCard.ZIndex = 13
+infoCard.Parent = pages["Misc"]
+corner(infoCard, 9)
+border(infoCard, Color3.fromRGB(60, 50, 100))
+
+lbl({
+    Size = UDim2.new(1, -16, 0, 18),
+    Position = UDim2.new(0, 12, 0, 8),
+    Text = "🩷 TiooScript — Piggy Edition",
+    TextSize = 11,
+    TextColor3 = TEXT,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    ZIndex = 14,
+    Parent = infoCard,
 })
-round(infoCard, 8)
-stroke(infoCard, C.AccentDim)
-newInst("TextLabel", {
-    Size = UDim2.new(1, -16, 1, 0),
-    Position = UDim2.new(0, 8, 0, 0),
-    BackgroundTransparency = 1,
-    Text = "🩷 TiooScript — Piggy Edition\nby Ridho (Tiooprime2) • v1.1",
-    TextColor3 = C.SubText,
-    TextSize = 10,
+
+lbl({
+    Size = UDim2.new(1, -16, 0, 14),
+    Position = UDim2.new(0, 12, 0, 28),
+    Text = "by Ridho (Tiooprime2) • v2.0",
+    TextSize = 9,
     Font = Enum.Font.Gotham,
-    TextWrapped = true,
+    TextColor3 = MUTED,
+    TextXAlignment = Enum.TextXAlignment.Left,
     ZIndex = 14,
     Parent = infoCard,
 })
 
 -- ══════════════════════════════════════
--- FOOTER
+-- DRAGGABLE WINDOW
 -- ══════════════════════════════════════
-local footer = newInst("Frame", {
-    Size = UDim2.new(1, 0, 0, 24),
-    Position = UDim2.new(0, 0, 1, -24),
-    BackgroundColor3 = C.Panel,
-    ZIndex = 12,
-    Parent = Main,
-})
-round(footer, 10)
-newInst("Frame", {
-    Size = UDim2.new(1, 0, 0.5, 0),
-    BackgroundColor3 = C.Panel,
-    ZIndex = 12,
-    Parent = footer,
-})
-
-local statusDot = newInst("Frame", {
-    Size = UDim2.new(0, 7, 0, 7),
-    Position = UDim2.new(0, 10, 0.5, -3.5),
-    BackgroundColor3 = C.ON,
-    ZIndex = 13,
-    Parent = footer,
-})
-round(statusDot, 4)
-
-local statusLbl = newInst("TextLabel", {
-    Size = UDim2.new(1, -30, 1, 0),
-    Position = UDim2.new(0, 22, 0, 0),
-    BackgroundTransparency = 1,
-    Text = "Script Active • NoClip: OFF",
-    TextColor3 = C.SubText,
-    TextSize = 9,
-    Font = Enum.Font.Gotham,
-    TextXAlignment = Enum.TextXAlignment.Left,
-    ZIndex = 13,
-    Parent = footer,
-})
-
--- ══════════════════════════════════════
--- TAB SWITCHING
--- ══════════════════════════════════════
-for _, name in ipairs(tabNames) do
-    tabBtns[name].MouseButton1Click:Connect(function()
-        for _, n in ipairs(tabNames) do
-            local isActive = n == name
-            makeTween(tabBtns[n], {
-                BackgroundColor3 = isActive and C.Accent or C.Card,
-                TextColor3 = isActive and Color3.fromRGB(255,255,255) or C.SubText
-            }, 0.2):Play()
-            tabPages[n].Visible = isActive
-        end
-    end)
-end
-
--- ══════════════════════════════════════
--- MINIMIZE / CLOSE
--- ══════════════════════════════════════
-btnMin.MouseButton1Click:Connect(function()
-    State.Minimized = not State.Minimized
-    if State.Minimized then
-        makeTween(Main, {Size = UDim2.new(0, 320, 0, 52)}, 0.3):Play()
-        btnMin.Text = "+"
-    else
-        makeTween(Main, {Size = UDim2.new(0, 320, 0, 420)}, 0.3):Play()
-        btnMin.Text = "—"
-    end
-end)
-
-btnClose.MouseButton1Click:Connect(function()
-    -- cleanup ESP sebelum destroy
-    refreshPlayerESP(false)
-    refreshPiggyESP(false)
-    makeTween(Main, {BackgroundTransparency = 1, Size = UDim2.new(0, 320, 0, 0)}, 0.3):Play()
-    task.wait(0.35)
-    ScreenGui:Destroy()
-end)
-
--- ══════════════════════════════════════
--- DRAGGABLE
--- ══════════════════════════════════════
-local draggingUI, dragStart, startPos
-Header.InputBegan:Connect(function(inp)
-    if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
-        draggingUI = true
+local dragging, dragStart, winStart
+header.InputBegan:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1
+    or inp.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
         dragStart = inp.Position
-        startPos = Main.Position
+        winStart  = win.Position
     end
 end)
-Header.InputEnded:Connect(function(inp)
-    if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
-        draggingUI = false
+header.InputEnded:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1
+    or inp.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
     end
 end)
-UserInputService.InputChanged:Connect(function(inp)
-    if draggingUI and (inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch) then
-        local delta = inp.Position - dragStart
-        Main.Position = UDim2.new(
-            startPos.X.Scale, startPos.X.Offset + delta.X,
-            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+UIS.InputChanged:Connect(function(inp)
+    if not dragging then return end
+    if inp.UserInputType == Enum.UserInputType.MouseMovement
+    or inp.UserInputType == Enum.UserInputType.Touch then
+        local d = inp.Position - dragStart
+        win.Position = UDim2.new(
+            winStart.X.Scale, winStart.X.Offset + d.X,
+            winStart.Y.Scale, winStart.Y.Offset + d.Y
+        )
+        shadow.Position = UDim2.new(
+            winStart.X.Scale, winStart.X.Offset + d.X - 10,
+            winStart.Y.Scale, winStart.Y.Offset + d.Y - 10
         )
     end
 end)
 
 -- ══════════════════════════════════════
--- NOCLIP LOOP — hanya aktif saat NoClip ON
+-- MINIMIZE
+-- ══════════════════════════════════════
+local minimized = false
+minBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    if minimized then
+        tw(win, {Size = UDim2.new(0, WIN_W, 0, 50)}, 0.25)
+        tw(shadow, {Size = UDim2.new(0, WIN_W+20, 0, 70)}, 0.25)
+        minBtn.Text = "+"
+    else
+        tw(win, {Size = UDim2.new(0, WIN_W, 0, WIN_H)}, 0.25)
+        tw(shadow, {Size = UDim2.new(0, WIN_W+20, 0, WIN_H+20)}, 0.25)
+        minBtn.Text = "—"
+    end
+end)
+
+-- ══════════════════════════════════════
+-- CLOSE
+-- ══════════════════════════════════════
+closeBtn.MouseButton1Click:Connect(function()
+    setPlayerESP(false)
+    setPiggyESP(false)
+    S.NoClip = false
+    setNoClip(LP.Character, false)
+    tw(win, {Size = UDim2.new(0, WIN_W, 0, 0), BackgroundTransparency = 1}, 0.25)
+    tw(shadow, {BackgroundTransparency = 1}, 0.25)
+    task.wait(0.3)
+    gui:Destroy()
+end)
+
+-- ══════════════════════════════════════
+-- NOCLIP LOOP (hanya saat ON)
 -- ══════════════════════════════════════
 RunService.Stepped:Connect(function()
-    if State.NoClip then
-        local char = LocalPlayer.Character
-        if char then
-            applyNoClip(char, true)
-        end
+    if S.NoClip then
+        setNoClip(LP.Character, true)
     end
-    statusLbl.Text = "Script Active • NoClip: " .. (State.NoClip and "ON ✓" or "OFF")
-    statusDot.BackgroundColor3 = State.NoClip and C.Accent or C.ON
+    statusTxt.Text = "Script aktif • NoClip: " .. (S.NoClip and "ON ✓" or "OFF")
+    dot.BackgroundColor3 = S.NoClip and ACCENT or GREEN
 end)
 
 -- ══════════════════════════════════════
 -- INFINITE JUMP
 -- ══════════════════════════════════════
-UserInputService.JumpRequest:Connect(function()
-    if State.InfiniteJump then
-        local char = LocalPlayer.Character
-        if char then
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
-        end
+UIS.JumpRequest:Connect(function()
+    if not S.InfiniteJump then return end
+    local char = LP.Character
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+end)
+
+-- ══════════════════════════════════════
+-- RESPAWN HANDLER
+-- ══════════════════════════════════════
+LP.CharacterAdded:Connect(function(char)
+    Char = char
+    savedCol = {}
+    local hum = char:WaitForChild("Humanoid", 5)
+    if hum then
+        hum.WalkSpeed = S.WalkSpeed
+        hum.JumpPower = S.JumpPower
+    end
+    if S.PlayerESP then
+        task.wait(0.5)
+        -- refresh ESP untuk diri sendiri kalau diperlukan
     end
 end)
 
--- ══════════════════════════════════════
--- CHARACTER RESPAWN HANDLER
--- ══════════════════════════════════════
-LocalPlayer.CharacterAdded:Connect(function(char)
-    Character = char
-    savedCollision = {} -- reset cache collision saat respawn
-    HumanoidRootPart = char:WaitForChild("HumanoidRootPart")
-    Humanoid = char:WaitForChild("Humanoid")
-    Humanoid.WalkSpeed = State.WalkSpeed
-    Humanoid.JumpPower = State.JumpPower
-end)
-
--- ══════════════════════════════════════
--- AUTO UPDATE ESP SAAT PLAYER LAIN JOIN
--- ══════════════════════════════════════
+-- Auto ESP untuk player yang baru join
 Players.PlayerAdded:Connect(function(plr)
-    if State.PlayerESP then
-        plr.CharacterAdded:Connect(function(char)
-            task.wait(0.5)
-            if State.PlayerESP then
-                addHighlight(char, Color3.fromRGB(0,255,80), Color3.fromRGB(0,200,60))
-            end
-        end)
-    end
+    plr.CharacterAdded:Connect(function(char)
+        task.wait(0.3)
+        if S.PlayerESP then
+            addHL(char, Color3.fromRGB(0,230,80), Color3.fromRGB(0,180,60))
+        end
+    end)
 end)
 
-print("[TiooScript] Piggy Script v1.1 loaded! Bug fixes: NoClip restore + Highlight ESP 🩷")
+print("[TiooScript v2.0] Loaded! 🩷")
