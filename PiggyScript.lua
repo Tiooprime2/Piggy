@@ -1,6 +1,6 @@
 -- ╔══════════════════════════════════════════════╗
 -- ║         PIGGY SCRIPT by TiooScript           ║
--- ║         UI: Dark Horror Edition              ║
+-- ║         UI: Dark Horror Edition  v1.1        ║
 -- ╚══════════════════════════════════════════════╝
 
 local Players = game:GetService("Players")
@@ -18,14 +18,16 @@ local Humanoid = Character:WaitForChild("Humanoid")
 -- STATE
 -- ══════════════════════════════════════
 local State = {
-    NoClip = false,
-    WalkSpeed = 16,
-    JumpPower = 50,
-    SpeedBoost = false,
-    InfiniteJump = false,
-    ESP = false,
-    Visible = true,
-    Minimized = false,
+    NoClip      = false,
+    WalkSpeed   = 16,
+    JumpPower   = 50,
+    SpeedBoost  = false,
+    InfiniteJump= false,
+    PlayerESP   = false,
+    PiggyESP    = false,
+    Fullbright  = false,
+    Minimized   = false,
+    AntiAFK     = false,
 }
 
 -- ══════════════════════════════════════
@@ -47,17 +49,17 @@ ScreenGui.Parent = CoreGui
 -- COLOR PALETTE
 -- ══════════════════════════════════════
 local C = {
-    BG       = Color3.fromRGB(6, 6, 10),
-    Panel    = Color3.fromRGB(12, 12, 20),
-    Card     = Color3.fromRGB(18, 18, 28),
-    Accent   = Color3.fromRGB(200, 40, 40),
-    AccentDim= Color3.fromRGB(100, 20, 20),
-    Text     = Color3.fromRGB(235, 225, 220),
-    SubText  = Color3.fromRGB(140, 130, 125),
-    ON       = Color3.fromRGB(60, 210, 100),
-    OFF      = Color3.fromRGB(200, 50, 50),
-    Border   = Color3.fromRGB(40, 15, 15),
-    Shadow   = Color3.fromRGB(0, 0, 0),
+    BG        = Color3.fromRGB(6, 6, 10),
+    Panel     = Color3.fromRGB(12, 12, 20),
+    Card      = Color3.fromRGB(18, 18, 28),
+    Accent    = Color3.fromRGB(200, 40, 40),
+    AccentDim = Color3.fromRGB(100, 20, 20),
+    Text      = Color3.fromRGB(235, 225, 220),
+    SubText   = Color3.fromRGB(140, 130, 125),
+    ON        = Color3.fromRGB(60, 210, 100),
+    OFF       = Color3.fromRGB(200, 50, 50),
+    Border    = Color3.fromRGB(40, 15, 15),
+    Shadow    = Color3.fromRGB(0, 0, 0),
 }
 
 -- ══════════════════════════════════════
@@ -70,9 +72,7 @@ end
 
 local function newInst(class, props)
     local inst = Instance.new(class)
-    for k, v in pairs(props) do
-        inst[k] = v
-    end
+    for k, v in pairs(props) do inst[k] = v end
     return inst
 end
 
@@ -91,17 +91,156 @@ local function stroke(frame, color, thickness)
     return s
 end
 
-local function shadow(frame)
-    local sh = newInst("Frame", {
-        Size = UDim2.new(1, 6, 1, 6),
-        Position = UDim2.new(0, 3, 0, 3),
-        BackgroundColor3 = C.Shadow,
-        BackgroundTransparency = 0.7,
-        ZIndex = frame.ZIndex - 1,
-        Parent = frame.Parent,
-    })
-    round(sh, 8)
-    return sh
+-- ══════════════════════════════════════
+-- NOCLIP — simpan collision asli, restore saat OFF
+-- ══════════════════════════════════════
+local savedCollision = {} -- [BasePart] = originalCanCollide
+
+local function applyNoClip(char, enable)
+    if not char then return end
+    for _, part in pairs(char:GetDescendants()) do
+        if part:IsA("BasePart") then
+            if enable then
+                -- simpan nilai asli sebelum dimatiin
+                if savedCollision[part] == nil then
+                    savedCollision[part] = part.CanCollide
+                end
+                part.CanCollide = false
+            else
+                -- kembalikan nilai asli
+                if savedCollision[part] ~= nil then
+                    part.CanCollide = savedCollision[part]
+                    savedCollision[part] = nil
+                else
+                    part.CanCollide = true
+                end
+            end
+        end
+    end
+end
+
+-- ══════════════════════════════════════
+-- ESP — pakai Highlight (tidak scale dengan jarak)
+-- ══════════════════════════════════════
+local ESP_FOLDER_NAME = "TiooESPHighlight"
+
+local function addHighlight(char, fillColor, outlineColor)
+    if not char then return end
+    -- hapus dulu kalau udah ada
+    local old_hl = char:FindFirstChild(ESP_FOLDER_NAME)
+    if old_hl then old_hl:Destroy() end
+
+    local hl = Instance.new("Highlight")
+    hl.Name = ESP_FOLDER_NAME
+    hl.Adornee = char
+    hl.FillColor = fillColor
+    hl.OutlineColor = outlineColor
+    hl.FillTransparency = 0.5
+    hl.OutlineTransparency = 0
+    -- DepthMode = AlwaysOnTop = tembus tembok
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.Parent = char
+end
+
+local function removeHighlight(char)
+    if not char then return end
+    local hl = char:FindFirstChild(ESP_FOLDER_NAME)
+    if hl then hl:Destroy() end
+end
+
+-- Player ESP (hijau)
+local playerESPConns = {}
+local function refreshPlayerESP(enable)
+    -- bersih koneksi lama
+    for _, conn in pairs(playerESPConns) do conn:Disconnect() end
+    playerESPConns = {}
+
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then
+            if enable then
+                -- pasang sekarang jika char udah ada
+                if plr.Character then
+                    addHighlight(plr.Character, Color3.fromRGB(0,255,80), Color3.fromRGB(0,200,60))
+                end
+                -- pasang juga kalau respawn
+                local conn = plr.CharacterAdded:Connect(function(char)
+                    task.wait(0.5)
+                    if State.PlayerESP then
+                        addHighlight(char, Color3.fromRGB(0,255,80), Color3.fromRGB(0,200,60))
+                    end
+                end)
+                table.insert(playerESPConns, conn)
+            else
+                if plr.Character then
+                    removeHighlight(plr.Character)
+                end
+            end
+        end
+    end
+end
+
+-- Piggy NPC ESP (merah)
+-- Piggy NPC biasanya punya Humanoid tapi bukan Player
+-- Kita scan workspace tiap beberapa detik
+local piggyESPConn = nil
+local function isPiggyNPC(model)
+    -- Cek: punya Humanoid, bukan karakter player
+    if not model:FindFirstChildOfClass("Humanoid") then return false end
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr.Character == model then return false end
+    end
+    return true
+end
+
+local function refreshPiggyESP(enable)
+    if piggyESPConn then
+        piggyESPConn:Disconnect()
+        piggyESPConn = nil
+    end
+
+    -- Hapus semua highlight piggy dulu
+    for _, model in pairs(workspace:GetDescendants()) do
+        if model:IsA("Model") and model:FindFirstChild(ESP_FOLDER_NAME) then
+            -- cek apakah ini NPC (bukan player char)
+            local isPlayer = false
+            for _, plr in pairs(Players:GetPlayers()) do
+                if plr.Character == model then isPlayer = true break end
+            end
+            if not isPlayer then
+                removeHighlight(model)
+            end
+        end
+    end
+
+    if not enable then return end
+
+    -- Scan dan pasang highlight ke Piggy NPC
+    local function scanAndHighlight()
+        for _, obj in pairs(workspace:GetDescendants()) do
+            if obj:IsA("Model") and isPiggyNPC(obj) then
+                local existing = obj:FindFirstChild(ESP_FOLDER_NAME)
+                if not existing then
+                    addHighlight(obj, Color3.fromRGB(255,30,30), Color3.fromRGB(255,0,0))
+                end
+            end
+        end
+    end
+
+    scanAndHighlight()
+
+    -- Loop terus tiap 2 detik (karena Piggy bisa spawn ulang)
+    piggyESPConn = RunService.Heartbeat:Connect(function()
+        if not State.PiggyESP then return end
+        -- hanya scan setiap ~2 detik biar ringan
+    end)
+
+    -- Gunakan task.spawn + loop ringan
+    task.spawn(function()
+        while State.PiggyESP do
+            scanAndHighlight()
+            task.wait(2)
+        end
+    end)
 end
 
 -- ══════════════════════════════════════
@@ -119,7 +258,6 @@ local Main = newInst("Frame", {
 round(Main, 10)
 stroke(Main, C.Border, 1.5)
 
--- Subtle noise texture overlay (gradient)
 local noise = newInst("Frame", {
     Size = UDim2.new(1, 0, 1, 0),
     BackgroundColor3 = Color3.fromRGB(255,255,255),
@@ -129,9 +267,7 @@ local noise = newInst("Frame", {
 })
 round(noise, 10)
 
--- ══════════════════════════════════════
 -- TOP ACCENT LINE
--- ══════════════════════════════════════
 local topLine = newInst("Frame", {
     Size = UDim2.new(1, 0, 0, 3),
     BackgroundColor3 = C.Accent,
@@ -160,7 +296,6 @@ local Header = newInst("Frame", {
 round(Header, 10)
 stroke(Header, C.Border, 1)
 
--- Bleed header bottom edge
 newInst("Frame", {
     Size = UDim2.new(1, 0, 0.5, 0),
     Position = UDim2.new(0, 0, 0.5, 0),
@@ -169,7 +304,6 @@ newInst("Frame", {
     Parent = Header,
 })
 
--- Blood drip icon
 local drip = newInst("TextLabel", {
     Size = UDim2.new(0, 36, 0, 36),
     Position = UDim2.new(0, 12, 0.5, -18),
@@ -181,7 +315,7 @@ local drip = newInst("TextLabel", {
 })
 round(drip, 8)
 
-local titleLabel = newInst("TextLabel", {
+newInst("TextLabel", {
     Size = UDim2.new(1, -120, 1, 0),
     Position = UDim2.new(0, 58, 0, 0),
     BackgroundTransparency = 1,
@@ -194,11 +328,11 @@ local titleLabel = newInst("TextLabel", {
     Parent = Header,
 })
 
-local subLabel = newInst("TextLabel", {
+newInst("TextLabel", {
     Size = UDim2.new(1, -120, 0, 16),
     Position = UDim2.new(0, 58, 0, 24),
     BackgroundTransparency = 1,
-    Text = "by TiooScript • v1.0",
+    Text = "by TiooScript • v1.1",
     TextColor3 = C.SubText,
     TextSize = 10,
     Font = Enum.Font.Gotham,
@@ -207,7 +341,6 @@ local subLabel = newInst("TextLabel", {
     Parent = Header,
 })
 
--- Minimize + Close buttons
 local btnMin = newInst("TextButton", {
     Size = UDim2.new(0, 26, 0, 26),
     Position = UDim2.new(1, -60, 0.5, -13),
@@ -237,7 +370,7 @@ round(btnClose, 6)
 stroke(btnClose, C.Accent, 1)
 
 -- ══════════════════════════════════════
--- TABS BAR
+-- TABS
 -- ══════════════════════════════════════
 local TabBar = newInst("Frame", {
     Size = UDim2.new(1, -16, 0, 32),
@@ -264,7 +397,6 @@ tabPad.Parent = TabBar
 local tabNames = {"Player", "Visual", "Misc"}
 local tabBtns = {}
 local tabPages = {}
-local activeTab = "Player"
 
 for i, name in ipairs(tabNames) do
     local btn = newInst("TextButton", {
@@ -294,9 +426,9 @@ local ContentArea = newInst("Frame", {
 })
 
 -- ══════════════════════════════════════
--- TOGGLE CARD BUILDER
+-- CARD BUILDER
 -- ══════════════════════════════════════
-local function makeCard(parent, label, desc, stateKey, callback)
+local function makeCard(parent, label, desc, initState, callback)
     local card = newInst("Frame", {
         Size = UDim2.new(1, 0, 0, 56),
         BackgroundColor3 = C.Card,
@@ -306,7 +438,6 @@ local function makeCard(parent, label, desc, stateKey, callback)
     round(card, 8)
     stroke(card, C.Border)
 
-    -- Left accent bar
     local bar = newInst("Frame", {
         Size = UDim2.new(0, 3, 0.6, 0),
         Position = UDim2.new(0, 0, 0.2, 0),
@@ -316,7 +447,7 @@ local function makeCard(parent, label, desc, stateKey, callback)
     })
     round(bar, 3)
 
-    local lbl = newInst("TextLabel", {
+    newInst("TextLabel", {
         Size = UDim2.new(1, -80, 0, 20),
         Position = UDim2.new(0, 14, 0, 8),
         BackgroundTransparency = 1,
@@ -329,7 +460,7 @@ local function makeCard(parent, label, desc, stateKey, callback)
         Parent = card,
     })
 
-    local sub = newInst("TextLabel", {
+    newInst("TextLabel", {
         Size = UDim2.new(1, -80, 0, 16),
         Position = UDim2.new(0, 14, 0, 30),
         BackgroundTransparency = 1,
@@ -342,11 +473,12 @@ local function makeCard(parent, label, desc, stateKey, callback)
         Parent = card,
     })
 
+    local currentState = initState or false
     local badge = newInst("TextButton", {
         Size = UDim2.new(0, 48, 0, 22),
         Position = UDim2.new(1, -58, 0.5, -11),
-        BackgroundColor3 = State[stateKey] and C.ON or C.OFF,
-        Text = State[stateKey] and "ON" or "OFF",
+        BackgroundColor3 = currentState and C.ON or C.OFF,
+        Text = currentState and "ON" or "OFF",
         TextColor3 = Color3.fromRGB(255,255,255),
         TextSize = 10,
         Font = Enum.Font.GothamBold,
@@ -356,11 +488,10 @@ local function makeCard(parent, label, desc, stateKey, callback)
     round(badge, 11)
 
     badge.MouseButton1Click:Connect(function()
-        State[stateKey] = not State[stateKey]
-        local isOn = State[stateKey]
-        makeTween(badge, {BackgroundColor3 = isOn and C.ON or C.OFF}, 0.2):Play()
-        badge.Text = isOn and "ON" or "OFF"
-        if callback then callback(isOn) end
+        currentState = not currentState
+        makeTween(badge, {BackgroundColor3 = currentState and C.ON or C.OFF}, 0.2):Play()
+        badge.Text = currentState and "ON" or "OFF"
+        if callback then callback(currentState) end
     end)
 
     return card
@@ -369,7 +500,7 @@ end
 -- ══════════════════════════════════════
 -- SLIDER BUILDER
 -- ══════════════════════════════════════
-local function makeSlider(parent, label, min, max, default, callback)
+local function makeSlider(parent, label, minV, maxV, default, callback)
     local card = newInst("Frame", {
         Size = UDim2.new(1, 0, 0, 60),
         BackgroundColor3 = C.Card,
@@ -388,7 +519,7 @@ local function makeSlider(parent, label, min, max, default, callback)
     })
     round(bar2, 3)
 
-    local lbl = newInst("TextLabel", {
+    newInst("TextLabel", {
         Size = UDim2.new(0.7, 0, 0, 18),
         Position = UDim2.new(0, 14, 0, 6),
         BackgroundTransparency = 1,
@@ -424,8 +555,9 @@ local function makeSlider(parent, label, min, max, default, callback)
     round(track, 3)
     stroke(track, C.Border)
 
+    local initRel = (default - minV) / (maxV - minV)
     local fill = newInst("Frame", {
-        Size = UDim2.new((default - min)/(max - min), 0, 1, 0),
+        Size = UDim2.new(initRel, 0, 1, 0),
         BackgroundColor3 = Color3.fromRGB(60, 140, 255),
         ZIndex = 15,
         Parent = track,
@@ -434,7 +566,7 @@ local function makeSlider(parent, label, min, max, default, callback)
 
     local knob = newInst("Frame", {
         Size = UDim2.new(0, 14, 0, 14),
-        Position = UDim2.new((default - min)/(max - min), -7, 0.5, -7),
+        Position = UDim2.new(initRel, -7, 0.5, -7),
         BackgroundColor3 = Color3.fromRGB(255, 255, 255),
         ZIndex = 16,
         Parent = track,
@@ -455,10 +587,8 @@ local function makeSlider(parent, label, min, max, default, callback)
     end)
     UserInputService.InputChanged:Connect(function(inp)
         if dragging and (inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch) then
-            local pos = inp.UserInputType == Enum.UserInputType.Touch and inp.Position or inp.Position
-            local rel = (pos.X - track.AbsolutePosition.X) / track.AbsoluteSize.X
-            rel = math.clamp(rel, 0, 1)
-            local val = math.floor(min + (max - min) * rel)
+            local rel = math.clamp((inp.Position.X - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+            local val = math.floor(minV + (maxV - minV) * rel)
             fill.Size = UDim2.new(rel, 0, 1, 0)
             knob.Position = UDim2.new(rel, -7, 0.5, -7)
             valLbl.Text = tostring(val)
@@ -505,25 +635,27 @@ end
 -- PLAYER PAGE
 local playerPage = makePage("Player")
 
--- NoClip
-makeCard(playerPage, "NO CLIP", "Tembus lewat tembok / dinding", "NoClip", function(on)
-    -- handled by RunService loop below
+makeCard(playerPage, "NO CLIP", "Tembus lewat tembok / dinding", false, function(on)
+    State.NoClip = on
+    if not on then
+        -- Restore collision langsung saat OFF
+        applyNoClip(LocalPlayer.Character, false)
+        savedCollision = {}
+    end
 end)
 
--- Speed Boost
-makeCard(playerPage, "SPEED BOOST", "Kecepatan lari lebih tinggi (x2)", "SpeedBoost", function(on)
+makeCard(playerPage, "SPEED BOOST", "Kecepatan lari lebih tinggi (x2)", false, function(on)
+    State.SpeedBoost = on
     local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
     if hum then
         hum.WalkSpeed = on and 32 or State.WalkSpeed
     end
 end)
 
--- Infinite Jump
-makeCard(playerPage, "INFINITE JUMP", "Loncat terus-terusan di udara", "InfiniteJump", function(on)
-    -- handled by UIS below
+makeCard(playerPage, "INFINITE JUMP", "Loncat terus-terusan di udara", false, function(on)
+    State.InfiniteJump = on
 end)
 
--- WalkSpeed Slider
 makeSlider(playerPage, "WALK SPEED", 8, 100, 16, function(val)
     State.WalkSpeed = val
     local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
@@ -532,69 +664,50 @@ makeSlider(playerPage, "WALK SPEED", 8, 100, 16, function(val)
     end
 end)
 
--- JumpPower Slider
 makeSlider(playerPage, "JUMP POWER", 20, 200, 50, function(val)
     State.JumpPower = val
     local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-    if hum then
-        hum.JumpPower = val
-    end
+    if hum then hum.JumpPower = val end
 end)
 
 -- VISUAL PAGE
 local visualPage = makePage("Visual")
 
-makeCard(visualPage, "PLAYER ESP", "Lihat semua player lewat tembok", "ESP", function(on)
-    -- ESP highlight logic
-    for _, plr in pairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer and plr.Character then
-            local highlight = plr.Character:FindFirstChild("TiooESP")
-            if on then
-                if not highlight then
-                    local h = Instance.new("SelectionBox")
-                    h.Name = "TiooESP"
-                    h.Adornee = plr.Character
-                    h.Color3 = C.Accent
-                    h.LineThickness = 0.05
-                    h.SurfaceTransparency = 0.7
-                    h.SurfaceColor3 = Color3.fromRGB(200, 40, 40)
-                    h.Parent = plr.Character
-                end
-            else
-                if highlight then highlight:Destroy() end
-            end
-        end
-    end
+makeCard(visualPage, "PLAYER ESP", "Highlight player (hijau, tembus tembok)", false, function(on)
+    State.PlayerESP = on
+    refreshPlayerESP(on)
 end)
 
-makeCard(visualPage, "PIGGY ESP", "Highlight posisi Piggy (NPC)", "NoClip", function(on)
-    -- placeholder — Piggy NPC name varies per chapter
+makeCard(visualPage, "PIGGY ESP", "Highlight Piggy NPC (merah, tembus tembok)", false, function(on)
+    State.PiggyESP = on
+    refreshPiggyESP(on)
 end)
 
-makeCard(visualPage, "FULLBRIGHT", "Terangi semua area gelap", "Visible", function(on)
-    game:GetService("Lighting").Brightness = on and 10 or 1
-    game:GetService("Lighting").FogEnd = on and 100000 or 1000
+makeCard(visualPage, "FULLBRIGHT", "Terangi semua area gelap", false, function(on)
+    State.Fullbright = on
+    local Lighting = game:GetService("Lighting")
+    Lighting.Brightness = on and 10 or 1
+    Lighting.FogEnd = on and 100000 or 1000
+    Lighting.GlobalShadows = not on
 end)
 
 -- MISC PAGE
 local miscPage = makePage("Misc")
 
-makeCard(miscPage, "AUTO COLLECT KEYS", "Auto ambil kunci / item quest", "NoClip", function(on)
-    -- placeholder for game-specific item collection
-end)
-
-makeCard(miscPage, "ANTI AFK", "Cegah kick karena idle", "Visible", function(on)
+makeCard(miscPage, "ANTI AFK", "Cegah kick karena idle", false, function(on)
+    State.AntiAFK = on
     if on then
         local VPS = game:GetService("VirtualUser")
         LocalPlayer.Idled:Connect(function()
-            VPS:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
-            task.wait(1)
-            VPS:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+            if State.AntiAFK then
+                VPS:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+                task.wait(1)
+                VPS:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+            end
         end)
     end
 end)
 
--- Info card at bottom of misc
 local infoCard = newInst("Frame", {
     Size = UDim2.new(1, 0, 0, 56),
     BackgroundColor3 = Color3.fromRGB(10, 10, 18),
@@ -607,7 +720,7 @@ newInst("TextLabel", {
     Size = UDim2.new(1, -16, 1, 0),
     Position = UDim2.new(0, 8, 0, 0),
     BackgroundTransparency = 1,
-    Text = "🩷 TiooScript — Piggy Edition\nby Ridho (Tiooprime2)",
+    Text = "🩷 TiooScript — Piggy Edition\nby Ridho (Tiooprime2) • v1.1",
     TextColor3 = C.SubText,
     TextSize = 10,
     Font = Enum.Font.Gotham,
@@ -617,7 +730,7 @@ newInst("TextLabel", {
 })
 
 -- ══════════════════════════════════════
--- FOOTER STATUS BAR
+-- FOOTER
 -- ══════════════════════════════════════
 local footer = newInst("Frame", {
     Size = UDim2.new(1, 0, 0, 24),
@@ -657,11 +770,10 @@ local statusLbl = newInst("TextLabel", {
 })
 
 -- ══════════════════════════════════════
--- TAB SWITCHING LOGIC
+-- TAB SWITCHING
 -- ══════════════════════════════════════
 for _, name in ipairs(tabNames) do
     tabBtns[name].MouseButton1Click:Connect(function()
-        activeTab = name
         for _, n in ipairs(tabNames) do
             local isActive = n == name
             makeTween(tabBtns[n], {
@@ -688,6 +800,9 @@ btnMin.MouseButton1Click:Connect(function()
 end)
 
 btnClose.MouseButton1Click:Connect(function()
+    -- cleanup ESP sebelum destroy
+    refreshPlayerESP(false)
+    refreshPiggyESP(false)
     makeTween(Main, {BackgroundTransparency = 1, Size = UDim2.new(0, 320, 0, 0)}, 0.3):Play()
     task.wait(0.35)
     ScreenGui:Destroy()
@@ -720,20 +835,15 @@ UserInputService.InputChanged:Connect(function(inp)
 end)
 
 -- ══════════════════════════════════════
--- NOCLIP LOOP
+-- NOCLIP LOOP — hanya aktif saat NoClip ON
 -- ══════════════════════════════════════
 RunService.Stepped:Connect(function()
     if State.NoClip then
         local char = LocalPlayer.Character
         if char then
-            for _, part in pairs(char:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    part.CanCollide = false
-                end
-            end
+            applyNoClip(char, true)
         end
     end
-    -- update status bar
     statusLbl.Text = "Script Active • NoClip: " .. (State.NoClip and "ON ✓" or "OFF")
     statusDot.BackgroundColor3 = State.NoClip and C.Accent or C.ON
 end)
@@ -756,10 +866,25 @@ end)
 -- ══════════════════════════════════════
 LocalPlayer.CharacterAdded:Connect(function(char)
     Character = char
+    savedCollision = {} -- reset cache collision saat respawn
     HumanoidRootPart = char:WaitForChild("HumanoidRootPart")
     Humanoid = char:WaitForChild("Humanoid")
     Humanoid.WalkSpeed = State.WalkSpeed
     Humanoid.JumpPower = State.JumpPower
 end)
 
-print("[TiooScript] Piggy Script loaded successfully! 🩷")
+-- ══════════════════════════════════════
+-- AUTO UPDATE ESP SAAT PLAYER LAIN JOIN
+-- ══════════════════════════════════════
+Players.PlayerAdded:Connect(function(plr)
+    if State.PlayerESP then
+        plr.CharacterAdded:Connect(function(char)
+            task.wait(0.5)
+            if State.PlayerESP then
+                addHighlight(char, Color3.fromRGB(0,255,80), Color3.fromRGB(0,200,60))
+            end
+        end)
+    end
+end)
+
+print("[TiooScript] Piggy Script v1.1 loaded! Bug fixes: NoClip restore + Highlight ESP 🩷")
